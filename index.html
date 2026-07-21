@@ -27,11 +27,21 @@
 <div class="scanlines"></div>
 <div id="app"></div>
 <script>
-const LS_U='nu11_users', LS_S='nu11_sess', LS_F='nu11_f_', LS_B='nu11_b_', LS_M='nu11_m_', LS_BURN='nu11_burn_';
+const LS_U='nu11_users', LS_S='nu11_sess', LS_F='nu11_f_', LS_B='nu11_b_', LS_M='nu11_m_', LS_BURN='nu11_burn_', LS_PEERS='nu11_peers';
 const BC = new BroadcastChannel('nu11_void_v4');
 let peer=null, conns={}, presence={}, peerId=null;
 
-function loadUsers(){try{let r=localStorage.getItem(LS_U);let u=r?JSON.parse(r):[];if(!u.find(x=>x.u==='demo')){u=[{u:'demo',p:btoa('demo123')},...u];localStorage.setItem(LS_U,JSON.stringify(u))}return u}catch{return [{u:'demo',p:btoa('demo123')}]}}
+function getUsers(){
+  try{
+    let r=localStorage.getItem(LS_U);
+    let u=r?JSON.parse(r):[];
+    if(!u.find(x=>x.u==='demo')){
+      u=[{u:'demo',p:btoa('demo123')},...u];
+      localStorage.setItem(LS_U,JSON.stringify(u));
+    }
+    return u;
+  }catch{return [{u:'demo',p:btoa('demo123')}]}
+}
 function saveUsers(u){localStorage.setItem(LS_U,JSON.stringify(u))}
 function getSess(){try{return JSON.parse(localStorage.getItem(LS_S))}catch{return null}}
 function setSess(o){localStorage.setItem(LS_S,JSON.stringify(o))}
@@ -44,9 +54,22 @@ function getMsgs(id){try{return JSON.parse(localStorage.getItem(LS_M+id)||'[]')}
 function setMsgs(id,m){localStorage.setItem(LS_M+id,JSON.stringify(m))}
 function getBurn(){try{return JSON.parse(localStorage.getItem(LS_BURN+state.user)||'{}')}catch{return{}}}
 
-let users=loadUsers();
+function savePeerId(user, id) {
+  try {
+    let peers = JSON.parse(localStorage.getItem(LS_PEERS) || '{}');
+    peers[user] = id;
+    localStorage.setItem(LS_PEERS, JSON.stringify(peers));
+  } catch(e) {}
+}
+function getPeerId(user) {
+  try {
+    let peers = JSON.parse(localStorage.getItem(LS_PEERS) || '{}');
+    return peers[user] || 'nu11_' + user;
+  } catch(e) { return 'nu11_' + user; }
+}
+
 let sess=getSess();
-let state={user:sess && users.find(x=>x.u===sess.u)?sess.u:null, mode:'create', search:'', active:null, msg:'', err:'', formU:'', formP:'', scanning:false, voidFound:[]};
+let state={user:sess && getUsers().find(x=>x.u===sess.u)?sess.u:null, mode:'create', search:'', active:null, msg:'', err:'', formU:'', formP:'', scanning:false, voidFound:[]};
 
 // particles
 const canvas=document.getElementById('void'), ctx=canvas.getContext('2d');
@@ -54,17 +77,41 @@ function resize(){canvas.width=innerWidth;canvas.height=innerHeight} resize(); a
 let dots=Array.from({length:80},()=>({x:Math.random()*innerWidth,y:Math.random()*innerHeight,vx:(Math.random()-0.5)*0.3,vy:(Math.random()-0.5)*0.3,r:Math.random()*1.5+0.2}));
 (function anim(){ctx.clearRect(0,0,canvas.width,canvas.height);dots.forEach(d=>{d.x+=d.vx;d.y+=d.vy;if(d.x<0||d.x>canvas.width)d.vx*=-1;if(d.y<0||d.y>canvas.height)d.vy*=-1;ctx.fillStyle='rgba(0,255,136,0.4)';ctx.beginPath();ctx.arc(d.x,d.y,d.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(anim)})();
 
+function connectToFriends(){
+  const friends = getFriends();
+  friends.forEach(f => {
+    if(!conns[f]){
+      try{
+        const c = peer.connect(getPeerId(f));
+        c.on('open', () => setupConn(c));
+      }catch(e){}
+    }
+  });
+}
+
 function initPeer(){
   if(peer) try{peer.destroy()}catch{}
   peerId='nu11_'+state.user;
   try{
     peer=new Peer(peerId);
-    peer.on('open',id=>{console.log('peer open',id); broadcastPresence()});
+    peer.on('open',id=>{
+      console.log('peer open',id);
+      peerId = id;
+      savePeerId(state.user, id);
+      broadcastPresence();
+      connectToFriends();
+    });
     peer.on('connection',c=>{ setupConn(c) });
     peer.on('error',e=>{
       if(e.type==='unavailable-id'){
-        peer=new Peer(peerId+'_'+Math.floor(Math.random()*9999));
-        peer.on('open',()=>broadcastPresence());
+        const fallbackId = peerId + '_' + Math.floor(Math.random()*9999);
+        peer=new Peer(fallbackId);
+        peer.on('open',id=>{
+          peerId = id;
+          savePeerId(state.user, id);
+          broadcastPresence();
+          connectToFriends();
+        });
         peer.on('connection',c=>setupConn(c));
       }
     });
@@ -81,6 +128,17 @@ function setupConn(conn){
       let msgs=getMsgs(id); msgs.push(data.msg); setMsgs(id,msgs);
       if(state.active===data.from) renderMessages();
       else render();
+      
+      const burn=getBurn();
+      if(burn[data.from]){
+        setTimeout(()=>{ 
+          let mm=getMsgs(id); 
+          mm=mm.filter(x=>x.id!==data.msg.id); 
+          setMsgs(id,mm); 
+          if(state.active===data.from) renderMessages(); 
+          else render();
+        },10000);
+      }
     }
     if(data.type==='presence'){ presence[data.from]={ts:Date.now(), peer:data.peerId}; updateVoidList(); }
   });
@@ -97,11 +155,22 @@ function broadcastPresence(){
 BC.onmessage=e=>{
   const d=e.data;
   if(!d || d.from===state.user) return;
-  if(d.type==='presence'){ presence[d.from]={ts:Date.now(), peer:d.peerId}; if(state.scanning) updateVoidList(); }
+  if(d.type==='presence'){ presence[d.from]={ts:Date.now(), peer:d.peerId}; updateVoidList(); }
   if(d.type==='msg'){
     const id=chatId(state.user,d.from);
     let msgs=getMsgs(id); msgs.push(d.msg); setMsgs(id,msgs);
     if(state.active===d.from) renderMessages(); else render();
+    
+    const burn=getBurn();
+    if(burn[d.from]){
+      setTimeout(()=>{ 
+        let mm=getMsgs(id); 
+        mm=mm.filter(x=>x.id!==d.msg.id); 
+        setMsgs(id,mm); 
+        if(state.active===d.from) renderMessages(); 
+        else render();
+      },10000);
+    }
   }
   if(d.type==='scan_req' && state.user){ BC.postMessage({type:'presence', from:state.user, peerId:peerId, ts:Date.now()}) }
 }
@@ -111,7 +180,7 @@ setInterval(()=>{
   const now=Date.now();
   Object.keys(presence).forEach(k=>{ if(now-presence[k].ts>25000) delete presence[k] });
   if(state.user) broadcastPresence();
-  if(state.scanning) updateVoidList();
+  updateVoidList();
 },3000);
 
 function addFriendSilent(name){
@@ -134,9 +203,9 @@ function updateVoidList(){
 }
 
 window.connectAndChat=function(name){
-  if(peer && presence[name]){
+  if(peer){
     try{
-      const targetId = presence[name].peer || 'nu11_'+name;
+      const targetId = getPeerId(name);
       const c = peer.connect(targetId);
       c.on('open',()=>{ setupConn(c); state.active=name; addFriendSilent(name); render(); });
       c.on('error',()=>{ state.active=name; addFriendSilent(name); render(); });
@@ -186,7 +255,7 @@ function render(){
   }
 
   const friends=getFriends(), blocked=getBlocked(), burn=getBurn();
-  const filtered = state.search.trim()? users.filter(u=>u.u!==state.user && u.u.includes(state.search.toLowerCase()) &&!blocked.includes(u.u)).slice(0,8) : [];
+  const filtered = state.search.trim()? getUsers().filter(u=>u.u!==state.user && u.u.toLowerCase().includes(state.search.toLowerCase()) &&!blocked.includes(u.u)).slice(0,8) : [];
 
   document.getElementById('app').innerHTML=`
   <div style="display:flex;height:100vh;width:100vw;position:relative;z-index:2">
@@ -262,7 +331,6 @@ function render(){
     </div>
   </div>`;
 
-  // attach listeners without full re-render
   setTimeout(()=>{
     const sInput=document.getElementById('searchInput');
     if(sInput){
@@ -291,7 +359,7 @@ function render(){
 function updateSearchDOM(){
   const el=document.getElementById('searchResults');
   if(!el) return;
-  const filtered = state.search.trim()? users.filter(u=>u.u!==state.user && u.u.toLowerCase().includes(state.search.toLowerCase()) &&!getBlocked().includes(u.u)).slice(0,8) : [];
+  const filtered = state.search.trim()? getUsers().filter(u=>u.u!==state.user && u.u.toLowerCase().includes(state.search.toLowerCase()) &&!getBlocked().includes(u.u)).slice(0,8) : [];
   if(!state.search.trim()){ el.innerHTML=''; return; }
   el.innerHTML = `
     <div style="padding:8px 12px 6px;font-size:10px;letter-spacing:0.15em;color:#00ff88">SEARCH • ${filtered.length}</div>
@@ -322,10 +390,12 @@ window.doAuth=function(){
   if(!/^[a-z0-9_]{3,15}$/.test(u)){ state.err='username 3-15, only a-z 0-9 _'; render(); return; }
   if(p.length<6){ state.err='password min 6 chars'; render(); return; }
   if(state.mode==='create'){
-    if(users.find(x=>x.u===u)){ state.err='username taken'; render(); return; }
-    users.push({u,p:btoa(p)}); saveUsers(users);
+    if(getUsers().find(x=>x.u===u)){ state.err='username taken'; render(); return; }
+    let uList = getUsers();
+    uList.push({u,p:btoa(p)}); 
+    saveUsers(uList);
   }else{
-    const f=users.find(x=>x.u===u);
+    const f=getUsers().find(x=>x.u===u);
     if(!f || f.p!==btoa(p)){ state.err='wrong username or password'; render(); return; }
   }
   state.user=u; setSess({u}); initPeer(); render();
@@ -334,7 +404,12 @@ window.logout=function(){ try{peer&&peer.destroy()}catch{}; localStorage.removeI
 window.addUser=function(name){
   let f=getFriends(); if(!f.includes(name)){ f.push(name); localStorage.setItem(LS_F+state.user, JSON.stringify(f)) }
   state.search=''; state.active=name;
-  if(peer){ try{ const c=peer.connect('nu11_'+name); c.on('open',()=>setupConn(c)); }catch{} }
+  if(peer){ 
+    try{ 
+      const c=peer.connect(getPeerId(name)); 
+      c.on('open',()=>setupConn(c)); 
+    }catch{} 
+  }
   render();
 }
 window.openChat=function(name){ state.active=name; render(); }
@@ -345,7 +420,6 @@ window.sendMsg=function(){
   const id=chatId(state.user, state.active);
   const msg={id:Date.now()+'', from:state.user, to:state.active, text:txt, ts:Date.now()};
   let msgs=getMsgs(id); msgs.push(msg); setMsgs(id,msgs);
-  // P2P send
   if(conns[state.active] && conns[state.active].open){
     try{ conns[state.active].send({type:'msg', from:state.user, msg}); }catch{}
   } else {
