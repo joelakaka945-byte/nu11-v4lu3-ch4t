@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nu11-v4lu3-ch4t</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;background:#050505;color:#eee;font-family:ui-monospace,Menlo,Monaco,monospace;overflow:hidden}
+  ::-webkit-scrollbar{width:6px;height:6px} ::-webkit-scrollbar-thumb{background:#222;border-radius:10px}
+ .grid-bg{background-image:linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.02) 1px, transparent 1px);background-size:22px 22px}
+  button{cursor:pointer;font-family:inherit}
+  input{font-family:inherit}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const LS_USERS='nu11_users', LS_SESS='nu11_sess', LS_F='nu11_f_', LS_B='nu11_b_', LS_M='nu11_m_', LS_BURN='nu11_burn_';
+const seed = [{u:'demo',p:btoa('demo123')}];
+function loadUsers(){ try{ let r=localStorage.getItem(LS_USERS); let u=r?JSON.parse(r):[]; if(!u.find(x=>x.u==='demo')){u=[...seed,...u]; saveUsers(u);} return u; }catch{ return [...seed] } }
+function saveUsers(u){ localStorage.setItem(LS_USERS, JSON.stringify(u)) }
+function getSess(){ try{return JSON.parse(localStorage.getItem(LS_SESS))}catch{return null} }
+function setSess(o){ localStorage.setItem(LS_SESS, JSON.stringify(o)) }
+function chatId(a,b){ return [a,b].sort().join('__') }
+function time(t){ return new Date(t).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) }
+
+let users = loadUsers();
+let sess = getSess();
+let state = {
+  user: sess && users.find(x=>x.u===sess.u)? sess.u : null,
+  mode: 'create',
+  search: '',
+  active: null,
+  msg: '',
+  err: '',
+  formU: '',
+  formP: '',
+  burn: {}
+};
+
+function persistFriends(){ if(!state.user) return; localStorage.setItem(LS_F+state.user, JSON.stringify(getFriends())) }
+function getFriends(){ try{return JSON.parse(localStorage.getItem(LS_F+state.user)||'[]')}catch{return[]} }
+function getBlocked(){ try{return JSON.parse(localStorage.getItem(LS_B+state.user)||'[]')}catch{return[]} }
+function getMsgs(id){ try{return JSON.parse(localStorage.getItem(LS_M+id)||'[]')}catch{return[]} }
+function setMsgs(id,m){ localStorage.setItem(LS_M+id, JSON.stringify(m)) }
+function getBurn(){ try{return JSON.parse(localStorage.getItem(LS_BURN+state.user)||'{}')}catch{return{}} }
+
+function render(){
+  const friends = state.user? getFriends() : [];
+  const blocked = state.user? getBlocked() : [];
+  const burn = state.user? getBurn() : {};
+  const activeId = state.user && state.active? chatId(state.user, state.active) : '';
+  const activeMsgs = activeId? getMsgs(activeId) : [];
+
+  const filtered = state.search.trim()? users.filter(u=> u.u!==state.user && u.u.includes(state.search.toLowerCase()) &&!blocked.includes(u.u)).slice(0,8) : [];
+
+  if(!state.user){
+    document.getElementById('app').innerHTML = `
+      <div class="grid-bg" style="min-height:100vh;display:grid;place-items:center;padding:20px">
+        <div style="width:100%;max-width:380px;border:1px solid #1a1a1a;background:#0a0a0a;border-radius:16px;overflow:hidden">
+          <div style="padding:22px 20px 16px;border-bottom:1px solid #151515;display:flex;justify-content:space-between;align-items:center">
+            <div><div style="font-weight:900;letter-spacing:0.2em">nu11-v4lu3-ch4t</div><div style="font-size:10px;color:#666;margin-top:4px;letter-spacing:0.15em">BLACK / WHITE / GREEN • NO LOGS</div></div>
+            <div style="font-size:10px;color:#00ff88;border:1px solid #00ff8822;background:#00ff880e;padding:4px 8px;border-radius:20px">v4 • P2P*</div>
+          </div>
+          <div style="padding:18px;display:flex;gap:8px">
+            <button onclick="state.mode='create';render()" style="flex:1;padding:10px;border-radius:10px;border:1px solid ${state.mode==='create'?'#fff':'#222'};background:${state.mode==='create'?'#fff':'#000'};color:${state.mode==='create'?'#000':'#666'};font-weight:700;font-size:12px">CREATE</button>
+            <button onclick="state.mode='login';render()" style="flex:1;padding:10px;border-radius:10px;border:1px solid ${state.mode==='login'?'#fff':'#222'};background:${state.mode==='login'?'#fff':'#000'};color:${state.mode==='login'?'#000':'#666'};font-weight:700;font-size:12px">LOGIN</button>
+          </div>
+          <div style="padding:0 18px 18px;display:flex;flex-direction:column;gap:12px">
+            <input id="u" placeholder="username (3-15, lowercase)" value="${state.formU}" style="width:100%;background:#000;border:1px solid #222;border-radius:10px;padding:12px 14px;color:#fff;outline:none;font-size:13px" />
+            <input id="p" type="password" placeholder="password (min 6)" value="${state.formP}" style="width:100%;background:#000;border:1px solid #222;border-radius:10px;padding:12px 14px;color:#fff;outline:none;font-size:13px" />
+            ${state.err?`<div style="font-size:11px;color:#ff6b6b;border:1px solid #ff6b6b22;background:#ff6b6b0e;padding:8px 10px;border-radius:8px">${state.err}</div>`:''}
+            <button onclick="doAuth()" style="width:100%;padding:12px;border-radius:10px;background:#fff;color:#000;font-weight:900;letter-spacing:0.1em;border:0">${state.mode==='create'?'CREATE ACCOUNT':'LOGIN'}</button>
+            <div style="font-size:10px;color:#555;line-height:1.5">demo account: <b style="color:#888">demo / demo123</b> — search it after login to test.<br>Passwords are NOT checked for reuse (that would leak them). Only usernames are unique.</div>
+          </div>
+        </div>
+      </div>`;
+      setTimeout(()=>{
+        const uu=document.getElementById('u'), pp=document.getElementById('p');
+        if(uu) uu.oninput=e=>{state.formU=e.target.value};
+        if(pp) pp.oninput=e=>{state.formP=e.target.value};
+      },0);
+    return;
+  }
+
+  // logged in UI
+  document.getElementById('app').innerHTML = `
+  <div style="display:flex;height:100vh;width:100vw;background:#050505">
+    <!-- left thin -->
+    <div style="width:68px;border-right:1px solid #151515;background:#080808;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:14px 0">
+      <div style="display:flex;flex-direction:column;gap:14px;align-items:center">
+        <div style="width:36px;height:36px;border-radius:50%;background:#fff;color:#000;display:grid;place-items:center;font-weight:900">${state.user[0].toUpperCase()}</div>
+        <div style="width:32px;height:32px;border-radius:9px;border:1px solid #222;display:grid;place-items:center;color:#666">⌬</div>
+      </div>
+      <button onclick="logout()" style="width:32px;height:32px;border-radius:9px;border:1px solid #222;background:#000;color:#666">↩</button>
+    </div>
+
+    <!-- middle chats -->
+    <div style="width:320px;min-width:320px;border-right:1px solid #151515;background:#0a0a0a;display:flex;flex-direction:column">
+      <div style="padding:16px;border-bottom:1px solid #151515">
+        <div style="font-weight:900;font-size:13px;letter-spacing:0.18em">nu11-v4lu3-ch4t</div>
+        <div style="font-size:10px;color:#666;margin-top:4px">@${state.user} • ${friends.length} chats • ${users.length} users</div>
+        <div style="margin-top:12px;position:relative">
+          <input value="${state.search}" oninput="state.search=this.value;renderList()" placeholder="search username to add..." style="width:100%;background:#000;border:1px solid #222;border-radius:10px;padding:10px 12px 10px 34px;color:#fff;outline:none;font-size:12px" />
+          <span style="position:absolute;left:11px;top:10px;color:#555">⌕</span>
+        </div>
+      </div>
+      <div id="list" style="flex:1;overflow:auto">
+        ${state.search.trim()? `
+          <div style="padding:12px 12px 6px;font-size:10px;letter-spacing:0.15em;color:#555">SEARCH RESULT • ${filtered.length}</div>
+          ${filtered.map(u=>`
+            <div style="padding:10px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #111">
+              <div style="display:flex;gap:10px;align-items:center"><div style="width:28px;height:28px;border-radius:50%;background:#151515;display:grid;place-items:center;font-size:12px">${u.u[0].toUpperCase()}</div><div style="font-size:12px">@${u.u}</div></div>
+              <button onclick="addUser('${u.u}')" style="padding:6px 10px;border-radius:20px;background:#fff;color:#000;font-size:11px;font-weight:700;border:0">+ ADD</button>
+            </div>
+          `).join('') || `<div style="padding:12px;color:#555;font-size:11px">no user found</div>`}
+          <div style="height:1px;background:#151515;margin:8px 0"></div>
+        ` : ''}
+        <div style="padding:12px 12px 6px;font-size:10px;letter-spacing:0.15em;color:#555">YOUR CHATS</div>
+        ${friends.length===0?`<div style="padding:20px;text-align:center;color:#555;font-size:11px">no chats yet<br>search username and add</div>`:
+          friends.map(f=>{
+            const id=chatId(state.user,f);
+            const msgs=getMsgs(id);
+            const last=msgs[msgs.length-1];
+            const active = state.active===f;
+            return `<div onclick="openChat('${f}')" style="padding:12px;display:flex;gap:10px;cursor:pointer;background:${active?'#111':'transparent'};border-left:${active?'2px solid #fff':'2px solid transparent'}">
+              <div style="width:32px;height:32px;border-radius:50%;background:${active?'#fff':'#151515'};color:${active?'#000':'#aaa'};display:grid;place-items:center;font-weight:700;font-size:12px;position:relative">${f[0].toUpperCase()}<span style="position:absolute;right:-2px;bottom:-2px;width:8px;height:8px;border-radius:50%;background:#00ff88;border:1px solid #000"></span></div>
+              <div style="flex:1;min-width:0"><div style="display:flex;justify-content:space-between"><span style="font-size:12px;font-weight:${active?'700':'400'}">@${f}</span><span style="font-size:10px;color:#666">${last?time(last.ts):''}</span></div><div style="font-size:11px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${last? (last.from===state.user?'you: ':'')+last.text : 'no messages yet'}</div></div>
+            </div>`
+          }).join('')
+        }
+      </div>
+      <div style="padding:10px;border-top:1px solid #151515;font-size:9px;color:#444;letter-spacing:0.15em">END-TO-END* • BURN MODE • LOCAL ONLY</div>
+    </div>
+
+    <!-- right chat -->
+    <div style="flex:1;display:flex;flex-direction:column;background:#080808">
+      ${!state.active?`
+        <div style="flex:1;display:grid;place-items:center;text-align:center;padding:20px">
+          <div><div style="display:inline-block;border:1px solid #1a1a1a;background:#000;border-radius:20px;padding:6px 12px;font-size:10px;letter-spacing:0.15em;color:#666">🔒 NO LOGS • NO TRACKING</div><div style="margin-top:16px;font-size:13px;color:#888">select a chat or add a user</div><div style="margin-top:8px;font-size:11px;color:#555">messages stay in this browser only. close tab = stays. clear = gone forever.</div></div>
+        </div>
+      `:`
+        <div style="height:56px;border-bottom:1px solid #151515;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#0a0a0a">
+          <div style="display:flex;gap:10px;align-items:center"><button onclick="state.active=null;render()" style="display:none" class="mob">←</button><div style="width:32px;height:32px;border-radius:50%;background:#fff;color:#000;display:grid;place-items:center;font-weight:800">${state.active[0].toUpperCase()}</div><div><div style="font-size:13px;font-weight:700">@${state.active}</div><div style="font-size:10px;color:#00ff88">● online • burn ${burn[state.active]?'ON':'OFF'}</div></div></div>
+          <div style="display:flex;gap:6px">
+            <button onclick="toggleBurn('${state.active}')" style="padding:7px 10px;border-radius:8px;border:1px solid ${burn[state.active]?'#ff8c0022':'#222'};background:${burn[state.active]?'#ff8c0014':'#000'};color:${burn[state.active]?'#ff9d2e':'#666'};font-size:11px">${burn[state.active]?'🔥 BURN ON':'🔥 BURN'}</button>
+            <button onclick="clearChat('${state.active}')" style="padding:7px 10px;border-radius:8px;border:1px solid #222;background:#000;color:#666;font-size:11px">CLEAR</button>
+            <button onclick="blockUser('${state.active}')" style="padding:7px 10px;border-radius:8px;border:1px solid #331a1a;background:#1a0e0e;color:#a55;font-size:11px">BLOCK</button>
+          </div>
+        </div>
+        <div id="msgs" style="flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:10px">
+          ${activeMsgs.length===0?`<div style="text-align:center;padding:40px 0;color:#555;font-size:11px">no messages with @${state.active} yet<br>say something private.</div>`:
+            activeMsgs.map(m=>{
+              const mine=m.from===state.user;
+              return `<div style="display:flex;justify-content:${mine?'flex-end':'flex-start'}"><div style="max-width:62%;padding:10px 12px;border-radius:14px;font-size:13px;line-height:1.4;background:${mine?'#fff':'#151515'};color:${mine?'#000':'#eee'};border-bottom-right-radius:${mine?'4px':'14px'};border-bottom-left-radius:${mine?'14px':'4px'};border:${mine?'0':'1px solid #222'}"><div>${escapeHtml(m.text)}</div><div style="margin-top:4px;font-size:9px;color:${mine?'#666':'#777'};display:flex;gap:6px">${time(m.ts)} ${mine?'✓✓':''} ${burn[state.active]?'🔥10s':''}</div></div></div>`
+            }).join('')
+          }
+        </div>
+        ${burn[state.active]?`<div style="margin:0 12px 8px;border:1px solid #ff8c0022;background:#ff8c000e;color:#ffb26a;font-size:10px;padding:6px 10px;border-radius:8px">burn mode: new messages delete after 10s for both sides (demo local)</div>`:''}
+        <div style="padding:12px;border-top:1px solid #151515;background:#0a0a0a;display:flex;gap:8px">
+          <input id="msgin" value="${state.msg.replace(/"/g,'&quot;')}" placeholder="message @${state.active}..." style="flex:1;background:#000;border:1px solid #222;border-radius:12px;padding:12px 14px;color:#fff;outline:none;font-size:13px" />
+          <button onclick="sendMsg()" style="width:44px;height:44px;border-radius:12px;background:#fff;color:#000;border:0;display:grid;place-items:center">➤</button>
+        </div>
+      `}
+    </div>
+  </div>`;
+
+  // bind
+  setTimeout(()=>{
+    const el=document.getElementById('msgs');
+    if(el) el.scrollTop = el.scrollHeight;
+    const mi=document.getElementById('msgin');
+    if(mi){ mi.focus(); mi.oninput=e=>{state.msg=e.target.value}; mi.onkeydown=e=>{ if(e.key==='Enter') sendMsg() } }
+  },0);
+}
+
+function renderList(){ render() }
+
+function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+
+window.doAuth = function(){
+  const u=document.getElementById('u').value.trim().toLowerCase();
+  const p=document.getElementById('p').value;
+  state.formU=u; state.formP=p;
+  state.err='';
+  if(!/^[a-z0-9_]{3,15}$/.test(u)){ state.err='username 3-15, only a-z 0-9 _'; render(); return; }
+  if(p.length<6){ state.err='password min 6 chars'; render(); return; }
+  if(state.mode==='create'){
+    if(users.find(x=>x.u===u)){ state.err='username taken, try another'; render(); return; }
+    users.push({u,p:btoa(p)}); saveUsers(users);
+  }else{
+    const found=users.find(x=>x.u===u);
+    if(!found || found.p!==btoa(p)){ state.err='wrong username or password'; render(); return; }
+  }
+  state.user=u; setSess({u}); render();
+}
+window.logout=function(){ localStorage.removeItem(LS_SESS); state.user=null; state.active=null; state.search=''; render(); }
+window.addUser=function(name){
+  const friends=getFriends();
+  if(!friends.includes(name)){ friends.push(name); localStorage.setItem(LS_F+state.user, JSON.stringify(friends)); }
+  state.search=''; state.active=name; render();
+}
+window.openChat=function(name){ state.active=name; render(); }
+window.sendMsg=function(){
+  if(!state.msg.trim() ||!state.active) return;
+  const id=chatId(state.user, state.active);
+  const msgs=getMsgs(id);
+  const m={id:Date.now()+'', from:state.user, to:state.active, text:state.msg.trim(), ts:Date.now()};
+  msgs.push(m); setMsgs(id, msgs);
+  // fake reply for demo user
+  if(state.active==='demo'){
+    setTimeout(()=>{
+      const replies=["ack.","null.","received.","roger.","stay private.","no logs.","copy that."];
+      const r={id:Date.now()+'r', from:'demo', to:state.user, text:replies[Math.floor(Math.random()*replies.length)], ts:Date.now()};
+      const cur=getMsgs(id); cur.push(r); setMsgs(id,cur);
+      // burn handling
+      const burn=getBurn();
+      if(burn[state.active]){
+        setTimeout(()=>{ let mm=getMsgs(id); mm=mm.filter(x=>x.id!==m.id && x.id!==r.id); setMsgs(id,mm); render(); },10000);
+      }
+      render();
+    },700);
+  } else {
+    const burn=getBurn();
+    if(burn[state.active]){
+      const mid=m.id;
+      setTimeout(()=>{ let mm=getMsgs(id); mm=mm.filter(x=>x.id!==mid); setMsgs(id,mm); render(); },10000);
+    }
+  }
+  state.msg=''; render();
+}
+window.clearChat=function(name){
+  if(!confirm('clear all messages with @'+name+'?')) return;
+  localStorage.removeItem(LS_M+chatId(state.user,name)); render();
+}
+window.blockUser=function(name){
+  if(!confirm('block @'+name+'? will delete chat')) return;
+  let b=getBlocked(); if(!b.includes(name)){ b.push(name); localStorage.setItem(LS_B+state.user, JSON.stringify(b)); }
+  let f=getFriends(); f=f.filter(x=>x!==name); localStorage.setItem(LS_F+state.user, JSON.stringify(f));
+  localStorage.removeItem(LS_M+chatId(state.user,name));
+  state.active=null; render();
+}
+window.toggleBurn=function(name){
+  const br=getBurn(); br[name]=!br[name]; localStorage.setItem(LS_BURN+state.user, JSON.stringify(br)); render();
+}
+
+render();
+</script>
+</body>
+</html>
